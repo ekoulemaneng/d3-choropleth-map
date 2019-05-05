@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <title>D3 Choropleth Map</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <script src="https://d3js.org/d3.v4.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js"></script>
+        <style>
+        /*---------------------------------------Reset CSS-----------------------------------------*/
+html, body, div, span, applet, object, iframe,
+h1, h2, h3, h4, h5, h6, p, blockquote, pre,
+a, abbr, acronym, address, big, cite, code,
+del, dfn, em, img, ins, kbd, q, s, samp,
+small, strike, strong, sub, sup, tt, var,
+b, u, i, center,
+dl, dt, dd, ol, ul, li,
+fieldset, form, label, legend,
+table, caption, tbody, tfoot, thead, tr, th, td,
+article, aside, canvas, details, embed, 
+figure, figcaption, footer, header, hgroup, 
+menu, nav, output, ruby, section, summary,
+time, mark, audio, video {
+margin: 0;
+padding: 0;
+border: 0;
+font-size: 100%;
+font: inherit;
+vertical-align: baseline;
+}
+/* HTML5 display-role reset for older browsers */
+article, aside, details, figcaption, figure, 
+footer, header, hgroup, menu, nav, section {
+display: block;
+}
+body {
+line-height: 1;
+}
+ol, ul {
+list-style: none;
+}
+blockquote, q {
+quotes: none;
+}
+blockquote:before, blockquote:after,
+q:before, q:after {
+content: '';
+content: none;
+}
+table {
+border-collapse: collapse;
+border-spacing: 0;
+}
+/*---------------------------------------------------------------*/
+
+main {
+    margin-top: 1rem;
+}
+
+h1, h2 {
+    text-align: center;
+    font-weight: bold;
+}
+
+h1#title {
+    font-size: 2rem;
+    line-height: 3rem;
+}
+
+h2#description {
+    font-size: 1.25rem;
+}
+
+svg {
+    display: block;
+    margin: 3% auto;
+}
+
+div#tooltip {
+    position: absolute;
+    color: white;
+    background-color: black;
+    box-sizing: content-box;
+    padding: 1rem;
+    font-size: 1rem;
+    border-radius: 2%;
+    opacity: .8;
+}
+
+#legend line {
+    stroke: white;
+}
+
+#legend path {
+    stroke: white;
+}
+        </style>
+    </head>
+    <body>
+        <main>
+            <h1 id="title">United States Educational Attainment</h1>
+            <h2 id="description">Percentage of adults age 25 and older with a bachelor's degree or higher (2010-2014)</h2>
+        </main>
+        <script>
+        let educationData = 'https://raw.githubusercontent.com/no-stack-dub-sack/testable-projects-fcc/master/src/data/choropleth_map/for_user_education.json';
+let topologyData = 'https://raw.githubusercontent.com/no-stack-dub-sack/testable-projects-fcc/master/src/data/choropleth_map/counties.json';
+
+let svgContainer = d3.select('main').append('svg').attr('viewBox', '-70 -10 1200 650');
+let colors = ['#E3F2FD', '#BBDEFB', '#90CAF9', '#64B5F6', '#42A5F5', '#2196F3', '#1E88E5', '#1976D2', '#1565C0', '#0D47A1'];
+
+let path = d3.geoPath();
+
+d3.queue().defer(d3.json, educationData).defer(d3.json, topologyData).await(buildMap);
+
+function buildMap(error, education, topology) {
+    if (error) throw console.error;
+
+    let GeoJSONNation = topojson.feature(topology, topology.objects.nation);
+    let GeoJSONStates = topojson.mesh(topology, topology.objects.states, (a, b) => a !== b);
+    let GeoJSONCounties = topojson.feature(topology, topology.objects.counties);
+
+    let minData = d3.min(education, d => d.bachelorsOrHigher);
+    let maxData = d3.max(education, d => d.bachelorsOrHigher);
+    let e = (maxData - minData) / 10;
+
+    let tooltip = d3.select('main').append('div').attr('id', 'tooltip').style('visibility', 'hidden');
+
+    let colorScale = d3.scaleLinear().domain([minData, maxData]).range([350, 50]); 
+    let colorAxis = d3.axisRight(colorScale).tickValues(function(){
+        let array = [];
+        for (let i = 1; i < 10; i++) array.push(minData + i * e);
+        return array;
+    }()).tickFormat( d => d3.format('.1f')(d) + '%'); 
+
+    let legend = svgContainer.append('g').attr('id', 'legend').attr('transform', 'translate(1000, 50)').call(colorAxis); 
+
+    svgContainer.append('g').selectAll('path').data(GeoJSONCounties.features).enter().append('path').attr('class', 'county').attr('data-fips', d => d.id).attr('data-education', d => findDataEducation(d.id, education)).attr('d', path).attr('fill', d => {
+        let data = findDataEducation(d.id, education);
+        return findColor(minData, maxData, data);
+    }).on('mouseover', d => {
+        tooltip.attr('data-education', findDataEducation(d.id, education)).style('top', (d3.event.pageY - 15) + 'px').style('left', (d3.event.pageX + 20) + 'px').style('visibility', 'visible').html(findCounty(d.id, education) + ', ' + findState(d.id, education) + ' : ' + findDataEducation(d.id, education) + '%');
+    }).on('mouseout', () => {tooltip.style('visibility', 'hidden');});
+
+    svgContainer.append('path').datum(GeoJSONStates).attr('d', path).attr('stroke', 'white').attr('stroke-width', '1.5').attr('fill', 'none');
+    
+    legend.selectAll('rect').data(colors).enter().append('rect').attr('fill', d => d).attr('x', -15).attr('y', (d, i) => colorScale(minData + (i + 1) * e)).attr('height', 30).attr('width', 20);
+    
+};
+
+function findDataEducation(id, array) {
+    let l = array.length;
+    let i;
+    for (i = 0; i < l; i++) {
+        if (array[i].fips === id) break;
+    }
+    return array[i].bachelorsOrHigher;
+}
+
+function findCounty(id, array) {
+    let l = array.length;
+    let i;
+    for (i = 0; i < l; i++) {
+        if (array[i].fips === id) break;
+    }
+    return array[i].area_name;
+}
+
+function findState(id, array) {
+    let l = array.length;
+    let i;
+    for (i = 0; i < l; i++) {
+        if (array[i].fips === id) break;
+    }
+    return array[i].state;
+}
+
+function findColor(min, max, data) {
+    let e = (max - min)/10;
+    let i;
+    for (i = 1; i <= 10; i++) {
+        if ((min + i * e) >= data) break;
+    }
+    return colors[i - 1];
+}
+        </script>
+        <script src="https://cdn.freecodecamp.org/testable-projects-fcc/v1/bundle.js"></script>
+    </body>
+</html>
